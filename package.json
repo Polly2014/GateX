@@ -2,7 +2,7 @@
   "name": "gatex",
   "displayName": "GateX",
   "description": "Your gateway to AI models - Access VS Code LLM providers via HTTP API",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "publisher": "BaoliWang",
   "icon": "images/gatex.png",
   "repository": {
