@@ -1,0 +1,111 @@
+{
+  "name": "gatex",
+  "displayName": "GateX",
+  "description": "Your gateway to AI models - Access VS Code LLM providers via HTTP API",
+  "version": "0.1.2",
+  "publisher": "BaoliWang",
+  "icon": "images/gatex.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Polly2014/GateX"
+  },
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Machine Learning",
+    "Other"
+  ],
+  "keywords": [
+    "llm",
+    "ai",
+    "copilot",
+    "openai",
+    "api",
+    "gateway"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "gatex.showInfo",
+        "title": "GateX: Show Connection Info"
+      },
+      {
+        "command": "gatex.copyEndpoint",
+        "title": "GateX: Copy Endpoint URL"
+      },
+      {
+        "command": "gatex.copyCode",
+        "title": "GateX: Copy Python Code Snippet"
+      },
+      {
+        "command": "gatex.healthCheck",
+        "title": "GateX: Check Model Health"
+      },
+      {
+        "command": "gatex.restart",
+        "title": "GateX: Restart Server"
+      },
+      {
+        "command": "gatex.openDashboard",
+        "title": "GateX: Open Dashboard"
+      }
+    ],
+    "configuration": {
+      "title": "GateX",
+      "properties": {
+        "gatex.port": {
+          "type": "number",
+          "default": 0,
+          "description": "Server port (0 = auto select)"
+        },
+        "gatex.timeout": {
+          "type": "number",
+          "default": 300,
+          "description": "Request timeout in seconds (default: 300)"
+        },
+        "gatex.maxRetries": {
+          "type": "number",
+          "default": 3,
+          "description": "Max retry attempts for failed requests"
+        },
+        "gatex.cacheEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable response caching"
+        },
+        "gatex.cacheMaxAge": {
+          "type": "number",
+          "default": 300,
+          "description": "Cache max age in seconds (default: 300)"
+        },
+        "gatex.maxConcurrent": {
+          "type": "number",
+          "default": 5,
+          "description": "Max concurrent requests (default: 5)"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src --ext ts",
+    "package": "vsce package",
+    "publish": "vsce publish"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.90.0",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "eslint": "^8.56.0",
+    "typescript": "^5.3.0",
+    "@vscode/vsce": "^2.22.0"
+  }
+}
