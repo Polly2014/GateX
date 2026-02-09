@@ -1,21 +1,17 @@
 # ⚡ GateX
 
-**Your gateway to AI models** - Access VS Code LLM providers via a simple HTTP API.
+**Your gateway to AI models** — Access VS Code LLM providers via a simple HTTP API.
 
 Turn your GitHub Copilot subscription into a local AI API server. Use Claude, GPT-4o, Gemini, and more with any OpenAI or Anthropic SDK.
 
-![GateX Dashboard](https://raw.githubusercontent.com/Polly2014/GateX/main/images/dashboard.png)
-
 ## ✨ Features
 
-- 🚀 **Zero Configuration** - Starts automatically, finds an available port
-- 🔌 **Dual API Format** - OpenAI + Anthropic compatible endpoints
-- 🌊 **SSE Streaming** - Real-time streaming responses
-- 🔄 **Smart Retry** - Exponential backoff for transient failures
-- 💾 **Response Cache** - LRU cache for repeated requests
-- 📊 **Cyberpunk Dashboard** - Real-time monitoring with Matrix aesthetics
-- 🏥 **Health Monitoring** - Check model availability and latency
-- 🎯 **Multi-Model Support** - Access Claude, GPT-4o, Gemini, and more
+- 🚀 **Zero Configuration** — Starts automatically, default port `24680`
+- 🔌 **Dual API Format** — OpenAI + Anthropic compatible endpoints
+- 🌊 **SSE Streaming** — Real-time streaming responses
+- 🔄 **Smart Retry** — Exponential backoff for transient failures
+- 🎯 **Multi-Model Support** — Access Claude, GPT-4o, Gemini, and more
+- ⚙️ **IDE Config Generator** — One-click setup for Claude Code, .env, etc.
 
 ## 🚀 Quick Start
 
@@ -24,15 +20,10 @@ Turn your GitHub Copilot subscription into a local AI API server. Use Claude, GP
 The extension starts automatically when VS Code opens. Look for the status bar item:
 
 ```
-⚡ GateX: 5 models
+⚡ GateX :24680
 ```
 
-### 2. Open Dashboard
-
-- Click the status bar item, or
-- Press `Cmd+Shift+P` → `GateX: Open Dashboard`
-
-### 3. Use in Your Code
+### 2. Use in Your Code
 
 **OpenAI Format:**
 
@@ -47,7 +38,7 @@ client = OpenAI(
 response = client.chat.completions.create(
     model="claude-sonnet-4",  # Or: gpt-4o, gpt-4o-mini, etc.
     messages=[{"role": "user", "content": "Hello!"}],
-    stream=True  # Streaming supported!
+    stream=True
 )
 
 for chunk in response:
@@ -76,6 +67,16 @@ for event in message:
         print(event.delta.text, end="")
 ```
 
+### 3. Configure Your IDE
+
+Press `Cmd+Shift+P` (or `Ctrl+Shift+P`) → `GateX: Configure for IDE` to auto-generate configs for:
+
+- **Claude Code** — Updates `.claude/settings.json` with `ANTHROPIC_BASE_URL`
+- **.env File** — Generates both OpenAI and Anthropic environment variables
+- **Clipboard** — Copies `export` or `$env:` commands for your terminal
+
+The config generator uses **smart merge** — it only updates GateX-related keys, preserving all your other settings.
+
 ## 📡 API Endpoints
 
 | Endpoint | Method | Description |
@@ -84,8 +85,6 @@ for event in message:
 | `/v1/chat/completions` | POST | OpenAI format chat |
 | `/v1/messages` | POST | Anthropic format chat |
 | `/v1/health` | GET | Server health status |
-| `/v1/stats` | GET | Usage statistics |
-| `/v1/cache/stats` | GET | Cache statistics |
 
 ## ⚙️ Configuration
 
@@ -94,29 +93,16 @@ for event in message:
 | `gatex.port` | `24680` | Server port (0 = auto select) |
 | `gatex.timeout` | `300` | Request timeout in seconds |
 | `gatex.maxRetries` | `3` | Max retry attempts |
-| `gatex.cacheEnabled` | `true` | Enable response caching |
-| `gatex.cacheMaxAge` | `300` | Cache TTL in seconds |
-| `gatex.maxConcurrent` | `5` | Max concurrent requests |
 
 ## 🎯 Commands
 
 | Command | Description |
 |---------|-------------|
-| `GateX: Open Dashboard` | Open Cyberpunk monitoring panel |
-| `GateX: Show Connection Info` | Display endpoint and models |
+| `GateX: Configure for IDE` | Generate config for Claude Code, .env, etc. |
+| `GateX: Show Connection Info` | Display endpoint, models, and quick actions |
 | `GateX: Copy Endpoint URL` | Copy endpoint to clipboard |
-| `GateX: Copy Python Code Snippet` | Copy ready-to-use code |
 | `GateX: Check Model Health` | Test all models |
 | `GateX: Restart Server` | Restart the HTTP server |
-
-## 🖥️ Dashboard
-
-GateX includes a Cyberpunk-styled monitoring dashboard:
-
-- **Real-time Stats** - Requests, success rate, tokens, RPM
-- **Model Health** - Ping all models with one click
-- **Cache Status** - Hit rate and memory usage
-- **Config Export** - Copy Python/cURL/Node.js snippets
 
 ## 🔧 Troubleshooting
 
@@ -129,8 +115,54 @@ Set `gatex.port` to `0` for auto-selection, or choose a different port.
 ### Request timeout?
 Increase `gatex.timeout` in settings for long-running requests.
 
-### Cache not working?
-Check if `gatex.cacheEnabled` is `true`. Only deterministic requests (temperature=0) are cached.
+### Model not found?
+GateX uses fuzzy matching — try shorter names like `claude-sonnet-4` or `gpt-4o`. Run `GateX: Show Connection Info` to see available models.
+
+## 🏗️ Architecture
+
+```
+┌─────────────────────────────────────────────────┐
+│  Your App / IDE / CLI                            │
+│  (OpenAI SDK / Anthropic SDK / curl)             │
+└─────────────┬───────────────────────────────────┘
+              │ HTTP (localhost:24680)
+┌─────────────▼───────────────────────────────────┐
+│  GateX Extension                                 │
+│  ┌─────────────────────────────────────────┐     │
+│  │  server.ts — HTTP Router                │     │
+│  │  • /v1/chat/completions (OpenAI)        │     │
+│  │  • /v1/messages (Anthropic)             │     │
+│  │  • Retry with exponential backoff       │     │
+│  └──────────────┬──────────────────────────┘     │
+│  ┌──────────────▼──────────────────────────┐     │
+│  │  models.ts — Model Manager              │     │
+│  │  • Exact + fuzzy matching               │     │
+│  │  • 30s model cache                      │     │
+│  └──────────────┬──────────────────────────┘     │
+│  ┌──────────────▼──────────────────────────┐     │
+│  │  configGenerator.ts — IDE Setup         │     │
+│  │  • Claude Code, .env, clipboard         │     │
+│  │  • Smart merge (preserve existing)      │     │
+│  └─────────────────────────────────────────┘     │
+└─────────────┬───────────────────────────────────┘
+              │ vscode.lm API (zero auth)
+┌─────────────▼───────────────────────────────────┐
+│  VS Code Language Model Providers                │
+│  (GitHub Copilot, etc.)                          │
+└─────────────────────────────────────────────────┘
+```
+
+## 📦 Source Files
+
+| File | Lines | Description |
+|------|-------|-------------|
+| `server.ts` | ~470 | HTTP server, OpenAI + Anthropic handlers, retry |
+| `models.ts` | ~160 | VS Code LM model management |
+| `configGenerator.ts` | ~280 | IDE config generation with smart merge |
+| `extension.ts` | ~160 | Entry point, command registration |
+| `statusBar.ts` | ~80 | Status bar display |
+
+**Total: ~1,150 lines** — lean and focused.
 
 ## 📄 License
 

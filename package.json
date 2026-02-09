@@ -2,7 +2,7 @@
   "name": "gatex",
   "displayName": "GateX",
   "description": "Your gateway to AI models - Access VS Code LLM providers via HTTP API",
-  "version": "0.1.3",
+  "version": "1.0.0",
   "publisher": "BaoliWang",
   "icon": "images/gatex.png",
   "repository": {
@@ -31,6 +31,10 @@
   "contributes": {
     "commands": [
       {
+        "command": "gatex.configureForIDE",
+        "title": "GateX: Configure for IDE"
+      },
+      {
         "command": "gatex.showInfo",
         "title": "GateX: Show Connection Info"
       },
@@ -39,20 +43,12 @@
         "title": "GateX: Copy Endpoint URL"
       },
       {
-        "command": "gatex.copyCode",
-        "title": "GateX: Copy Python Code Snippet"
-      },
-      {
         "command": "gatex.healthCheck",
         "title": "GateX: Check Model Health"
       },
       {
         "command": "gatex.restart",
         "title": "GateX: Restart Server"
-      },
-      {
-        "command": "gatex.openDashboard",
-        "title": "GateX: Open Dashboard"
       }
     ],
     "configuration": {
@@ -60,8 +56,8 @@
       "properties": {
         "gatex.port": {
           "type": "number",
-          "default": 0,
-          "description": "Server port (0 = auto select)"
+          "default": 24680,
+          "description": "Server port (0 = auto select, default: 24680)"
         },
         "gatex.timeout": {
           "type": "number",
@@ -72,21 +68,6 @@
           "type": "number",
           "default": 3,
           "description": "Max retry attempts for failed requests"
-        },
-        "gatex.cacheEnabled": {
-          "type": "boolean",
-          "default": true,
-          "description": "Enable response caching"
-        },
-        "gatex.cacheMaxAge": {
-          "type": "number",
-          "default": 300,
-          "description": "Cache max age in seconds (default: 300)"
-        },
-        "gatex.maxConcurrent": {
-          "type": "number",
-          "default": 5,
-          "description": "Max concurrent requests (default: 5)"
         }
       }
     }

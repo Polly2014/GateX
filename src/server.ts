@@ -1,21 +1,20 @@
 /**
- * GateX HTTP Server - Full Featured Edition
+ * GateX HTTP Server v2
  * 
- * Features:
+ * Lean and focused:
  * - OpenAI API compatible (/v1/chat/completions)
  * - Anthropic API compatible (/v1/messages)
  * - SSE Streaming support
- * - Smart retry with exponential backoff
- * - Response caching
- * - Request queuing
+ * - Simple retry with exponential backoff
  */
 
 import * as http from 'http';
 import * as vscode from 'vscode';
 import { ModelManager } from './models';
-import { statsManager, StatsManager } from './stats';
-import { requestQueue } from './queue';
-import { responseCache } from './cache';
+
+// ============================================================================
+// Types
+// ============================================================================
 
 interface ChatMessage {
     role: 'system' | 'user' | 'assistant';
@@ -27,6 +26,7 @@ interface OpenAIChatRequest {
     messages: ChatMessage[];
     max_tokens?: number;
     temperature?: number;
+    top_p?: number;
     stream?: boolean;
 }
 
@@ -40,8 +40,14 @@ interface AnthropicRequest {
     messages: AnthropicMessage[];
     system?: string;
     max_tokens: number;
+    temperature?: number;
+    top_p?: number;
     stream?: boolean;
 }
+
+// ============================================================================
+// Server
+// ============================================================================
 
 export class GateXServer {
     private server: http.Server | null = null;
@@ -94,7 +100,7 @@ export class GateXServer {
                 return port;
             }
         }
-        return 0;
+        return 0; // OS will assign one
     }
 
     private isPortAvailable(port: number): Promise<boolean> {
@@ -108,6 +114,10 @@ export class GateXServer {
             server.listen(port, '127.0.0.1');
         });
     }
+
+    // ============================================================================
+    // Request Router
+    // ============================================================================
 
     private async handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
         // CORS headers
@@ -124,25 +134,14 @@ export class GateXServer {
         const url = req.url || '/';
 
         try {
-            // OpenAI endpoints
             if (url === '/v1/models' || url === '/models') {
                 await this.handleModels(req, res);
             } else if (url === '/v1/chat/completions' || url === '/chat/completions') {
                 await this.handleOpenAIChatCompletions(req, res);
-            }
-            // Anthropic endpoints
-            else if (url === '/v1/messages' || url === '/messages') {
+            } else if (url === '/v1/messages' || url === '/messages') {
                 await this.handleAnthropicMessages(req, res);
-            }
-            // Utility endpoints
-            else if (url === '/v1/health' || url === '/health') {
+            } else if (url === '/v1/health' || url === '/health') {
                 await this.handleHealth(req, res);
-            } else if (url === '/v1/stats' || url === '/stats') {
-                await this.handleStats(req, res);
-            } else if (url === '/v1/cache/stats' || url === '/cache/stats') {
-                this.handleCacheStats(req, res);
-            } else if (url === '/v1/cache/clear' || url === '/cache/clear') {
-                this.handleCacheClear(req, res);
             } else if (url === '/' || url === '/v1') {
                 this.handleRoot(req, res);
             } else {
@@ -154,20 +153,16 @@ export class GateXServer {
         }
     }
 
-    private handleRoot(req: http.IncomingMessage, res: http.ServerResponse): void {
+    // ============================================================================
+    // Root / Models / Health
+    // ============================================================================
+
+    private handleRoot(_req: http.IncomingMessage, res: http.ServerResponse): void {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
             name: 'GateX',
-            version: '0.5.0',
-            description: 'Your gateway to AI models - Better than Agent Maestro',
-            features: [
-                'OpenAI API compatible',
-                'Anthropic API compatible', 
-                'SSE Streaming',
-                'Smart retry with exponential backoff',
-                'Response caching',
-                'Request queuing'
-            ],
+            version: '1.0.0',
+            description: 'Your gateway to AI models',
             endpoints: {
                 openai: {
                     models: '/v1/models',
@@ -177,19 +172,17 @@ export class GateXServer {
                     messages: '/v1/messages'
                 },
                 utility: {
-                    health: '/v1/health',
-                    stats: '/v1/stats',
-                    cacheStats: '/v1/cache/stats',
-                    cacheClear: '/v1/cache/clear'
+                    health: '/v1/health'
                 }
             }
         }, null, 2));
     }
 
-    private async handleModels(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    private async handleModels(_req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
         const models = await this.modelManager.getModels();
         
-        const response = {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
             object: 'list',
             data: models.map(m => ({
                 id: m.id,
@@ -199,16 +192,27 @@ export class GateXServer {
                 name: m.name,
                 context_window: m.maxInputTokens
             }))
-        };
+        }, null, 2));
+    }
 
+    private async handleHealth(_req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+        const models = await this.modelManager.getModels();
+        
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(response, null, 2));
+        res.end(JSON.stringify({
+            status: 'healthy',
+            server: 'GateX',
+            version: '1.0.0',
+            port: this.port,
+            models: models.length,
+            timestamp: new Date().toISOString()
+        }, null, 2));
     }
 
     // ============================================================================
     // OpenAI API Handler
     // ============================================================================
-    
+
     private async handleOpenAIChatCompletions(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
         if (req.method !== 'POST') {
             this.sendError(res, 405, 'method_not_allowed', 'Use POST');
@@ -216,7 +220,14 @@ export class GateXServer {
         }
 
         const body = await this.parseBody(req);
-        const request = JSON.parse(body) as OpenAIChatRequest;
+
+        let request: OpenAIChatRequest;
+        try {
+            request = JSON.parse(body) as OpenAIChatRequest;
+        } catch {
+            this.sendError(res, 400, 'invalid_json', 'Request body is not valid JSON');
+            return;
+        }
 
         if (!request.model) {
             this.sendError(res, 400, 'invalid_request', 'model is required');
@@ -228,68 +239,47 @@ export class GateXServer {
             return;
         }
 
-        // Check cache first
-        const cacheKey = responseCache.generateKey(request.model, request.messages);
-        const cached = responseCache.get(cacheKey);
-        if (cached && !request.stream) {
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ ...cached, _cached: true }));
-            return;
-        }
-
         const model = await this.modelManager.getModel(request.model);
         if (!model) {
             this.sendError(res, 404, 'model_not_found', `Model '${request.model}' not available`);
             return;
         }
 
-        // Convert to VS Code format
         const messages = this.convertToVSCodeMessages(request.messages);
+        const modelOptions = this.buildModelOptions(request);
 
-        // Streaming response
         if (request.stream) {
-            await this.handleOpenAIStream(res, model, request.model, messages);
+            await this.handleOpenAIStream(res, model, request.model, messages, modelOptions);
             return;
         }
 
-        // Non-streaming with queue and retry
+        // Non-streaming with retry
         const config = vscode.workspace.getConfiguration('gatex');
         const timeout = (config.get<number>('timeout') || 300) * 1000;
         const maxRetries = config.get<number>('maxRetries') || 3;
 
         try {
-            statsManager.connectionStart();
-            
-            const result = await requestQueue.enqueue(async () => {
+            const result = await this.executeWithRetry(async () => {
                 const startTime = Date.now();
-                
+
                 const cts = new vscode.CancellationTokenSource();
                 const timeoutId = setTimeout(() => cts.cancel(), timeout);
 
-                const response = await model.sendRequest(messages, {}, cts.token);
-                
-                let content = '';
-                for await (const chunk of response.text) {
-                    content += chunk;
+                try {
+                    const response = await model.sendRequest(messages, modelOptions, cts.token);
+                    
+                    let content = '';
+                    for await (const chunk of response.text) {
+                        content += chunk;
+                    }
+
+                    clearTimeout(timeoutId);
+                    return { content, latency: Date.now() - startTime };
+                } catch (error) {
+                    clearTimeout(timeoutId);
+                    throw error;
                 }
-
-                clearTimeout(timeoutId);
-                return { content, latency: Date.now() - startTime };
-            }, { maxRetries });
-
-            // Estimate tokens
-            const inputTokens = request.messages.reduce((sum, m) => sum + StatsManager.estimateTokens(m.content), 0);
-            const outputTokens = StatsManager.estimateTokens(result.content);
-
-            statsManager.recordRequest({
-                timestamp: Date.now(),
-                model: request.model,
-                latency: result.latency,
-                inputTokens,
-                outputTokens,
-                success: true
-            });
-            statsManager.connectionEnd();
+            }, maxRetries);
 
             const response = {
                 id: `chatcmpl-${Date.now()}`,
@@ -302,36 +292,18 @@ export class GateXServer {
                     finish_reason: 'stop'
                 }],
                 usage: {
-                    prompt_tokens: inputTokens,
-                    completion_tokens: outputTokens,
-                    total_tokens: inputTokens + outputTokens
-                },
-                _gatex: {
-                    latency_ms: result.latency,
-                    queue_stats: requestQueue.getStats()
+                    prompt_tokens: 0,
+                    completion_tokens: 0,
+                    total_tokens: 0
                 }
             };
-
-            // Cache the response
-            responseCache.set(cacheKey, response);
 
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify(response));
 
         } catch (error: any) {
-            statsManager.connectionEnd();
-            statsManager.recordRequest({
-                timestamp: Date.now(),
-                model: request.model,
-                latency: 0,
-                inputTokens: 0,
-                outputTokens: 0,
-                success: false,
-                error: error.message
-            });
-
             if (error.message?.includes('cancelled')) {
-                this.sendError(res, 408, 'timeout', `Request exceeded ${timeout/1000}s timeout`);
+                this.sendError(res, 408, 'timeout', `Request exceeded ${timeout / 1000}s timeout`);
             } else {
                 this.sendError(res, 500, 'model_error', error.message || String(error));
             }
@@ -339,10 +311,11 @@ export class GateXServer {
     }
 
     private async handleOpenAIStream(
-        res: http.ServerResponse, 
-        model: vscode.LanguageModelChat, 
+        res: http.ServerResponse,
+        model: vscode.LanguageModelChat,
         modelId: string,
-        messages: vscode.LanguageModelChatMessage[]
+        messages: vscode.LanguageModelChatMessage[],
+        modelOptions: Record<string, any>
     ): Promise<void> {
         res.writeHead(200, {
             'Content-Type': 'text/event-stream',
@@ -355,18 +328,12 @@ export class GateXServer {
         const streamId = `chatcmpl-${Date.now()}`;
 
         try {
-            statsManager.connectionStart();
-            const startTime = Date.now();
-
             const cts = new vscode.CancellationTokenSource();
             const timeoutId = setTimeout(() => cts.cancel(), timeout);
 
-            const response = await model.sendRequest(messages, {}, cts.token);
-            
-            let fullContent = '';
+            const response = await model.sendRequest(messages, modelOptions, cts.token);
+
             for await (const chunk of response.text) {
-                fullContent += chunk;
-                
                 const data = {
                     id: streamId,
                     object: 'chat.completion.chunk',
@@ -378,14 +345,13 @@ export class GateXServer {
                         finish_reason: null
                     }]
                 };
-
                 res.write(`data: ${JSON.stringify(data)}\n\n`);
             }
 
             clearTimeout(timeoutId);
 
-            // Send final chunk
-            const finalData = {
+            // Final chunk
+            res.write(`data: ${JSON.stringify({
                 id: streamId,
                 object: 'chat.completion.chunk',
                 created: Math.floor(Date.now() / 1000),
@@ -395,29 +361,14 @@ export class GateXServer {
                     delta: {},
                     finish_reason: 'stop'
                 }]
-            };
-            res.write(`data: ${JSON.stringify(finalData)}\n\n`);
+            })}\n\n`);
             res.write('data: [DONE]\n\n');
             res.end();
 
-            const latency = Date.now() - startTime;
-            statsManager.recordRequest({
-                timestamp: Date.now(),
-                model: modelId,
-                latency,
-                inputTokens: 0,
-                outputTokens: StatsManager.estimateTokens(fullContent),
-                success: true
-            });
-            statsManager.connectionEnd();
-
         } catch (error: any) {
-            statsManager.connectionEnd();
-            
-            const errorData = {
+            res.write(`data: ${JSON.stringify({
                 error: { message: error.message || String(error), type: 'stream_error' }
-            };
-            res.write(`data: ${JSON.stringify(errorData)}\n\n`);
+            })}\n\n`);
             res.end();
         }
     }
@@ -428,12 +379,19 @@ export class GateXServer {
 
     private async handleAnthropicMessages(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
         if (req.method !== 'POST') {
-            this.sendError(res, 405, 'method_not_allowed', 'Use POST');
+            this.sendAnthropicError(res, 405, 'method_not_allowed', 'Use POST');
             return;
         }
 
         const body = await this.parseBody(req);
-        const request = JSON.parse(body) as AnthropicRequest;
+
+        let request: AnthropicRequest;
+        try {
+            request = JSON.parse(body) as AnthropicRequest;
+        } catch {
+            this.sendAnthropicError(res, 400, 'invalid_request_error', 'Request body is not valid JSON');
+            return;
+        }
 
         if (!request.model) {
             this.sendAnthropicError(res, 400, 'invalid_request_error', 'model is required');
@@ -445,71 +403,49 @@ export class GateXServer {
             return;
         }
 
-        // Map Anthropic model names to available models
-        const modelMapping: { [key: string]: string } = {
-            'claude-3-opus-20240229': 'claude-3-opus',
-            'claude-3-sonnet-20240229': 'claude-3-sonnet',
-            'claude-3-haiku-20240307': 'claude-3-haiku',
-            'claude-sonnet-4-20250514': 'claude-sonnet-4',
-            'claude-3-5-sonnet-20241022': 'claude-3.5-sonnet'
-        };
-
-        const mappedModel = modelMapping[request.model] || request.model;
-        const model = await this.modelManager.getModel(mappedModel);
-        
+        // Use dynamic model matching (no hardcoded mapping)
+        const model = await this.modelManager.getModel(request.model);
         if (!model) {
             this.sendAnthropicError(res, 404, 'not_found_error', `Model '${request.model}' not available`);
             return;
         }
 
-        // Convert Anthropic format to VS Code format
         const messages = this.convertAnthropicToVSCodeMessages(request.messages, request.system);
+        const modelOptions = this.buildModelOptions(request);
 
-        // Streaming
         if (request.stream) {
-            await this.handleAnthropicStream(res, model, request.model, messages);
+            await this.handleAnthropicStream(res, model, request.model, messages, modelOptions);
             return;
         }
 
-        // Non-streaming
+        // Non-streaming with retry
         const config = vscode.workspace.getConfiguration('gatex');
         const timeout = (config.get<number>('timeout') || 300) * 1000;
         const maxRetries = config.get<number>('maxRetries') || 3;
 
         try {
-            statsManager.connectionStart();
-
-            const result = await requestQueue.enqueue(async () => {
+            const result = await this.executeWithRetry(async () => {
                 const startTime = Date.now();
-                
+
                 const cts = new vscode.CancellationTokenSource();
                 const timeoutId = setTimeout(() => cts.cancel(), timeout);
 
-                const response = await model.sendRequest(messages, {}, cts.token);
-                
-                let content = '';
-                for await (const chunk of response.text) {
-                    content += chunk;
+                try {
+                    const response = await model.sendRequest(messages, modelOptions, cts.token);
+                    
+                    let content = '';
+                    for await (const chunk of response.text) {
+                        content += chunk;
+                    }
+
+                    clearTimeout(timeoutId);
+                    return { content, latency: Date.now() - startTime };
+                } catch (error) {
+                    clearTimeout(timeoutId);
+                    throw error;
                 }
+            }, maxRetries);
 
-                clearTimeout(timeoutId);
-                return { content, latency: Date.now() - startTime };
-            }, { maxRetries });
-
-            const inputTokens = StatsManager.estimateTokens(JSON.stringify(request.messages));
-            const outputTokens = StatsManager.estimateTokens(result.content);
-
-            statsManager.recordRequest({
-                timestamp: Date.now(),
-                model: request.model,
-                latency: result.latency,
-                inputTokens,
-                outputTokens,
-                success: true
-            });
-            statsManager.connectionEnd();
-
-            // Anthropic response format
             const response = {
                 id: `msg_${Date.now()}`,
                 type: 'message',
@@ -522,8 +458,8 @@ export class GateXServer {
                 stop_reason: 'end_turn',
                 stop_sequence: null,
                 usage: {
-                    input_tokens: inputTokens,
-                    output_tokens: outputTokens
+                    input_tokens: 0,
+                    output_tokens: 0
                 }
             };
 
@@ -531,7 +467,6 @@ export class GateXServer {
             res.end(JSON.stringify(response));
 
         } catch (error: any) {
-            statsManager.connectionEnd();
             this.sendAnthropicError(res, 500, 'api_error', error.message || String(error));
         }
     }
@@ -540,7 +475,8 @@ export class GateXServer {
         res: http.ServerResponse,
         model: vscode.LanguageModelChat,
         modelId: string,
-        messages: vscode.LanguageModelChatMessage[]
+        messages: vscode.LanguageModelChatMessage[],
+        modelOptions: Record<string, any>
     ): Promise<void> {
         res.writeHead(200, {
             'Content-Type': 'text/event-stream',
@@ -553,10 +489,7 @@ export class GateXServer {
         const messageId = `msg_${Date.now()}`;
 
         try {
-            statsManager.connectionStart();
-            const startTime = Date.now();
-
-            // Send message_start
+            // message_start
             res.write(`event: message_start\ndata: ${JSON.stringify({
                 type: 'message_start',
                 message: {
@@ -571,7 +504,7 @@ export class GateXServer {
                 }
             })}\n\n`);
 
-            // Send content_block_start
+            // content_block_start
             res.write(`event: content_block_start\ndata: ${JSON.stringify({
                 type: 'content_block_start',
                 index: 0,
@@ -581,12 +514,9 @@ export class GateXServer {
             const cts = new vscode.CancellationTokenSource();
             const timeoutId = setTimeout(() => cts.cancel(), timeout);
 
-            const response = await model.sendRequest(messages, {}, cts.token);
-            
-            let fullContent = '';
+            const response = await model.sendRequest(messages, modelOptions, cts.token);
+
             for await (const chunk of response.text) {
-                fullContent += chunk;
-                
                 res.write(`event: content_block_delta\ndata: ${JSON.stringify({
                     type: 'content_block_delta',
                     index: 0,
@@ -596,40 +526,27 @@ export class GateXServer {
 
             clearTimeout(timeoutId);
 
-            // Send content_block_stop
+            // content_block_stop
             res.write(`event: content_block_stop\ndata: ${JSON.stringify({
                 type: 'content_block_stop',
                 index: 0
             })}\n\n`);
 
-            // Send message_delta
+            // message_delta
             res.write(`event: message_delta\ndata: ${JSON.stringify({
                 type: 'message_delta',
                 delta: { stop_reason: 'end_turn', stop_sequence: null },
-                usage: { output_tokens: StatsManager.estimateTokens(fullContent) }
+                usage: { output_tokens: 0 }
             })}\n\n`);
 
-            // Send message_stop
+            // message_stop
             res.write(`event: message_stop\ndata: ${JSON.stringify({
                 type: 'message_stop'
             })}\n\n`);
 
             res.end();
 
-            const latency = Date.now() - startTime;
-            statsManager.recordRequest({
-                timestamp: Date.now(),
-                model: modelId,
-                latency,
-                inputTokens: 0,
-                outputTokens: StatsManager.estimateTokens(fullContent),
-                success: true
-            });
-            statsManager.connectionEnd();
-
         } catch (error: any) {
-            statsManager.connectionEnd();
-            
             res.write(`event: error\ndata: ${JSON.stringify({
                 type: 'error',
                 error: { type: 'api_error', message: error.message || String(error) }
@@ -639,68 +556,67 @@ export class GateXServer {
     }
 
     // ============================================================================
-    // Utility Handlers
+    // Helpers
     // ============================================================================
 
-    private async handleHealth(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-        const models = await this.modelManager.getModels();
-        const queueStats = requestQueue.getStats();
-        const cacheStats = responseCache.getStats();
-        
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({
-            status: 'healthy',
-            server: 'GateX',
-            version: '0.5.0',
-            port: this.port,
-            models: models.length,
-            queue: queueStats,
-            cache: cacheStats,
-            timestamp: new Date().toISOString()
-        }, null, 2));
-    }
+    /**
+     * Build model options from request parameters.
+     * Passes temperature/max_tokens/top_p via modelOptions for forward compatibility.
+     * Note: VS Code LM API may not honor all parameters — the underlying provider decides.
+     */
+    private buildModelOptions(request: OpenAIChatRequest | AnthropicRequest): Record<string, any> {
+        const opts: Record<string, any> = {};
 
-    private async handleStats(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-        const stats = statsManager.getStats();
-        const queueStats = requestQueue.getStats();
-        const cacheStats = responseCache.getStats();
-        
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({
-            uptime: stats.uptime,
-            totalRequests: stats.global.totalRequests,
-            activeConnections: stats.global.activeConnections,
-            totalInputTokens: stats.global.totalInputTokens,
-            totalOutputTokens: stats.global.totalOutputTokens,
-            avgLatency: Math.round(stats.avgLatency),
-            successRate: parseFloat(stats.successRate.toFixed(2)),
-            rpm: stats.rpm,
-            tpm: stats.tpm,
-            queue: queueStats,
-            cache: cacheStats
-        }, null, 2));
-    }
-
-    private handleCacheStats(req: http.IncomingMessage, res: http.ServerResponse): void {
-        const stats = responseCache.getStats();
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(stats, null, 2));
-    }
-
-    private handleCacheClear(req: http.IncomingMessage, res: http.ServerResponse): void {
-        if (req.method !== 'POST') {
-            this.sendError(res, 405, 'method_not_allowed', 'Use POST');
-            return;
+        if (request.temperature !== undefined) {
+            opts['temperature'] = request.temperature;
         }
-        
-        responseCache.clear();
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true, message: 'Cache cleared' }));
+        if (request.max_tokens !== undefined) {
+            opts['max_tokens'] = request.max_tokens;
+        }
+        if ('top_p' in request && request.top_p !== undefined) {
+            opts['top_p'] = request.top_p;
+        }
+
+        if (Object.keys(opts).length > 0) {
+            return { modelOptions: opts } as any;
+        }
+        return {};
     }
 
-    // ============================================================================
-    // Helper Methods
-    // ============================================================================
+    /**
+     * Execute a function with exponential backoff retry.
+     */
+    private async executeWithRetry<T>(fn: () => Promise<T>, maxRetries: number): Promise<T> {
+        let lastError: Error | undefined;
+
+        for (let attempt = 0; attempt <= maxRetries; attempt++) {
+            try {
+                return await fn();
+            } catch (error: any) {
+                lastError = error;
+                if (attempt < maxRetries && this.isRetryable(error)) {
+                    const delay = Math.pow(2, attempt) * 1000; // 1s, 2s, 4s
+                    console.log(`[GateX] Retry ${attempt + 1}/${maxRetries} after ${delay}ms`);
+                    await new Promise(r => setTimeout(r, delay));
+                    continue;
+                }
+                throw error;
+            }
+        }
+
+        throw lastError;
+    }
+
+    private isRetryable(error: any): boolean {
+        const message = (error.message || '').toLowerCase();
+        const retryable = ['timeout', 'rate limit', 'too many requests', '429', '500', '502', '503', '504', 'econnreset', 'socket hang up'];
+        const nonRetryable = ['cancelled', 'invalid', 'unauthorized', '401', '403', '404'];
+
+        if (nonRetryable.some(p => message.includes(p))) {
+            return false;
+        }
+        return retryable.some(p => message.includes(p));
+    }
 
     private convertToVSCodeMessages(messages: ChatMessage[]): vscode.LanguageModelChatMessage[] {
         return messages.map(m => {
@@ -713,19 +629,18 @@ export class GateXServer {
     }
 
     private convertAnthropicToVSCodeMessages(
-        messages: AnthropicMessage[], 
+        messages: AnthropicMessage[],
         system?: string
     ): vscode.LanguageModelChatMessage[] {
         const result: vscode.LanguageModelChatMessage[] = [];
 
-        // Add system message first if present
         if (system) {
             result.push(vscode.LanguageModelChatMessage.User(system));
         }
 
         for (const m of messages) {
-            const content = typeof m.content === 'string' 
-                ? m.content 
+            const content = typeof m.content === 'string'
+                ? m.content
                 : m.content.map(c => c.text).join('');
 
             if (m.role === 'user') {
@@ -741,7 +656,7 @@ export class GateXServer {
     private parseBody(req: http.IncomingMessage): Promise<string> {
         return new Promise((resolve, reject) => {
             let body = '';
-            req.on('data', chunk => body += chunk);
+            req.on('data', (chunk: Buffer) => body += chunk);
             req.on('end', () => resolve(body));
             req.on('error', reject);
         });

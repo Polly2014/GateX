@@ -50,12 +50,12 @@ export class StatusBarManager implements vscode.Disposable {
                 break;
             
             case 'running':
-                this.statusBarItem.text = `$(zap) GateX`;
+                this.statusBarItem.text = `$(zap) GateX :${this.port}`;
                 this.statusBarItem.tooltip = new vscode.MarkdownString(
                     `**⚡ GateX is running**\n\n` +
-                    `- **Port:** ${this.port}\n` +
+                    `- **Endpoint:** http://localhost:${this.port}/v1\n` +
                     `- **Models:** ${this.modelCount}\n\n` +
-                    `Click to open dashboard`
+                    `Click for actions`
                 );
                 this.statusBarItem.backgroundColor = undefined;
                 break;
