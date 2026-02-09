@@ -68,6 +68,12 @@
           "type": "number",
           "default": 3,
           "description": "Max retry attempts for failed requests"
+        },
+        "gatex.vendors": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": ["copilot"],
+          "description": "Model vendors to expose. Options: copilot, aitk-github, aitk-foundry, aitk-foundry-local, or * for all"
         }
       }
     }

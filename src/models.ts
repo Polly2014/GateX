@@ -149,7 +149,12 @@ export class ModelManager {
     }
 
     /**
-     * Fetch models from VS Code (with caching)
+     * Fetch models from VS Code (with caching + vendor filtering)
+     * 
+     * gatex.vendors config controls which providers are exposed:
+     * - ["copilot"]  → Only GitHub Copilot models (default, matches CopilotX)
+     * - ["copilot", "aitk-github"] → Copilot + GitHub Models
+     * - ["*"] → All providers (215+ models)
      */
     private async fetchModels(): Promise<vscode.LanguageModelChat[]> {
         const now = Date.now();
@@ -159,7 +164,18 @@ export class ModelManager {
         }
 
         try {
-            this.modelCache = await vscode.lm.selectChatModels({});
+            const allModels = await vscode.lm.selectChatModels({});
+            
+            // Apply vendor filter
+            const config = vscode.workspace.getConfiguration('gatex');
+            const vendors = config.get<string[]>('vendors') || ['copilot'];
+            
+            if (vendors.includes('*')) {
+                this.modelCache = allModels;
+            } else {
+                this.modelCache = allModels.filter(m => vendors.includes(m.vendor));
+            }
+            
             this.cacheTime = now;
             return this.modelCache;
         } catch (error) {
