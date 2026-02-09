@@ -62,7 +62,15 @@ export class GateXServer {
         const config = vscode.workspace.getConfiguration('gatex');
         const configuredPort = config.get<number>('port') || 0;
         
-        this.port = configuredPort || await this.findAvailablePort();
+        // If a port is configured, try it first; if busy, fallback to auto-find
+        if (configuredPort && await this.isPortAvailable(configuredPort)) {
+            this.port = configuredPort;
+        } else {
+            this.port = await this.findAvailablePort();
+            if (configuredPort && this.port !== configuredPort) {
+                console.log(`[GateX] Port ${configuredPort} busy, using ${this.port}`);
+            }
+        }
 
         return new Promise((resolve, reject) => {
             this.server = http.createServer((req, res) => {
