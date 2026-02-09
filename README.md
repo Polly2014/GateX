@@ -71,11 +71,12 @@ for event in message:
 
 Press `Cmd+Shift+P` (or `Ctrl+Shift+P`) → `GateX: Configure for IDE` to auto-generate configs for:
 
-- **Claude Code** — Updates `.claude/settings.json` with `ANTHROPIC_BASE_URL`
+- **Claude Code** — Updates `.claude/settings.json` with dual model selection (main + fast), onboarding bypass, and telemetry opt-out
+- **Codex CLI** — Generates `~/.codex/config.toml` with GateX as model provider
 - **.env File** — Generates both OpenAI and Anthropic environment variables
 - **Clipboard** — Copies `export` or `$env:` commands for your terminal
 
-The config generator uses **smart merge** — it only updates GateX-related keys, preserving all your other settings.
+The config generator uses **smart merge** — it only updates GateX-related keys, preserving all your other settings. Model picker shows grouped results with ⭐ recommendations per IDE.
 
 ## 📡 API Endpoints
 
@@ -93,6 +94,7 @@ The config generator uses **smart merge** — it only updates GateX-related keys
 | `gatex.port` | `24680` | Server port (0 = auto select) |
 | `gatex.timeout` | `300` | Request timeout in seconds |
 | `gatex.maxRetries` | `3` | Max retry attempts |
+| `gatex.vendors` | `["copilot"]` | Model vendors to expose (`copilot`, `aitk-github`, `aitk-foundry`, `*`) |
 
 ## 🎯 Commands
 
@@ -141,7 +143,9 @@ GateX uses fuzzy matching — try shorter names like `claude-sonnet-4` or `gpt-4
 │  └──────────────┬──────────────────────────┘     │
 │  ┌──────────────▼──────────────────────────┐     │
 │  │  configGenerator.ts — IDE Setup         │     │
-│  │  • Claude Code, .env, clipboard         │     │
+│  │  • Claude Code (dual model + onboarding)│     │
+│  │  • Codex CLI (TOML config)              │     │
+│  │  • .env, clipboard                      │     │
 │  │  • Smart merge (preserve existing)      │     │
 │  └─────────────────────────────────────────┘     │
 └─────────────┬───────────────────────────────────┘
@@ -156,13 +160,13 @@ GateX uses fuzzy matching — try shorter names like `claude-sonnet-4` or `gpt-4
 
 | File | Lines | Description |
 |------|-------|-------------|
-| `server.ts` | ~470 | HTTP server, OpenAI + Anthropic handlers, retry |
-| `models.ts` | ~160 | VS Code LM model management |
-| `configGenerator.ts` | ~280 | IDE config generation with smart merge |
+| `server.ts` | ~490 | HTTP server, OpenAI + Anthropic handlers, retry |
+| `configGenerator.ts` | ~460 | IDE config generation (Claude Code, Codex, .env) |
+| `models.ts` | ~195 | VS Code LM model management + vendor filter |
 | `extension.ts` | ~160 | Entry point, command registration |
 | `statusBar.ts` | ~80 | Status bar display |
 
-**Total: ~1,150 lines** — lean and focused.
+**Total: ~1,385 lines** — lean and focused.
 
 ## 📄 License
 
